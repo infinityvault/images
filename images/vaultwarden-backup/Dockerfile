@@ -6,7 +6,8 @@ RUN apk add --no-cache \
       postgresql16-client \
       jq \
       bash \
-      ca-certificates
+      ca-certificates \
+      dcron
 
 # Create script location
 WORKDIR /app

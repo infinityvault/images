@@ -242,7 +242,19 @@ check_prereqs
 case "${1:-}" in
   backup)
     shift
-    do_backup "$@"
+    if [[ "${1:-}" == "--schedule" ]]; then
+      shift
+      schedule="$1"
+      if [[ -z "$schedule" ]]; then
+        echo "ERROR: --schedule requires a cron expression" >&2
+        exit 2
+      fi
+      log info "Starting scheduled backups with cron: $schedule"
+      echo "$schedule /usr/local/bin/vaultwarden-backup backup" > /etc/crontabs/root
+      crond -f -d 0
+    else
+      do_backup "$@"
+    fi
     ;;
   restore)
     shift
