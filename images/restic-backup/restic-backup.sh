@@ -26,7 +26,7 @@ notify_telegram() {
 
 # --- Helper: Check/Init restic repo ---
 check_or_init_repo() {
-    if ! restic snapshots >/dev/null 2>&1; then
+    if ! restic snapshots --no-lock >/dev/null 2>&1; then
         echo "Initializing restic repository..."
         restic init || { notify_telegram "Restic repo initialization failed"; exit 1; }
     fi
@@ -79,7 +79,7 @@ db_is_empty() {
 select_snapshot() {
     local BEFORE="$1"
     local snaps
-    snaps="$(restic snapshots --json)"
+    snaps="$(restic snapshots --no-lock --json)"
     if [[ -z "$snaps" ]] || [[ "$(echo "$snaps" | jq 'length')" -eq 0 ]]; then
         echo ""
         return 0
@@ -120,7 +120,7 @@ run_restore() {
     fi
     if data_dir_is_empty; then
         echo "Restoring snapshot $snap to $DATA_DIR..."
-        if restic restore "$snap" --target "/"; then
+        if restic restore --no-lock "$snap" --target "/"; then
             restored=true
         else
             notify_telegram "Restic restore (filesystem) failed"
