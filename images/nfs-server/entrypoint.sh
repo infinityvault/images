@@ -11,6 +11,13 @@ if [ -n "$DEVICE_PATH" ]; then
     log "DEVICE_PATH specified: $DEVICE_PATH"
     if [ -n "$DEVICE_PASSWORD" ]; then
         log "Decrypting device $DEVICE_PATH with cryptsetup."
+
+        # Handle mapper
+        if cryptsetup status drive >/dev/null 2>&1; then
+            cryptsetup luksClose drive
+        fi
+
+        # Decrypt drive
         echo -n "$DEVICE_PASSWORD" | cryptsetup luksOpen "$DEVICE_PATH" drive --key-file=/dev/stdin
         MOUNT_DEVICE="/dev/mapper/drive"
         log "Device decrypted and available at $MOUNT_DEVICE."
