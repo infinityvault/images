@@ -13,14 +13,21 @@ POSTGRES_DUMP_FILE="${POSTGRES_DUMP_FILE:-db_dump.sql}"
 TELEGRAM_BOT_TOKEN="${TELEGRAM_BOT_TOKEN}"
 TELEGRAM_GROUP_ID="${TELEGRAM_GROUP_ID}"
 TELEGRAM_NOTIFY_ALWAYS="${TELEGRAM_NOTIFY_ALWAYS:-false}"
+TELEGRAM_NAME="${TELEGRAM_NAME}"
 
 # --- Helper: Telegram notification ---
 notify_telegram() {
     local message="$1"
+    local suffix=""
+
+    if [[ -n "$TELEGRAM_NAME" ]]; then
+        suffix=" ($TELEGRAM_NAME)"
+    fi
+
     if [[ -n "$TELEGRAM_BOT_TOKEN" && -n "$TELEGRAM_GROUP_ID" ]]; then
         curl -s -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \
             -d chat_id="${TELEGRAM_GROUP_ID}" \
-            -d text="$message" >/dev/null
+            -d text="${message}${suffix}" >/dev/null
     fi
 }
 
@@ -152,6 +159,27 @@ run_restore() {
     fi
 }
 
+# --- Cleanup ---
+run_cleanup() {
+    check_or_init_repo
+
+    echo "Running restic forget $* ..."
+    if ! restic forget "$@"; then
+        notify_telegram "Restic cleanup (forget) failed"
+        exit 1
+    fi
+
+    echo "Running restic prune ..."
+    if ! restic prune; then
+        notify_telegram "Restic cleanup (prune) failed"
+        exit 1
+    fi
+
+    if [[ "$TELEGRAM_NOTIFY_ALWAYS" == "true" ]]; then
+        notify_telegram "Restic cleanup completed successfully"
+    fi
+}
+
 # --- Cron setup ---
 setup_cron() {
     local cron_expr="$1"
@@ -166,6 +194,11 @@ show_help() {
 Usage:
   $0 backup [--schedule "<cron expression>"]
   $0 restore [--before "YYYY-MM-DD" | "YYYY-MM-DDTHH:MM:SSZ"]
+  $0 cleanup [--keep-daily N] [--keep-weekly N] [--keep-monthly N] [--keep-yearly N] [...]
+
+Examples:
+  $0 cleanup --keep-weekly 2
+  $0 cleanup --keep-daily 7 --keep-weekly 4
 
 Configuration (via environment variables):
   DATA_DIR                Directory to backup/restore (default: /data)
@@ -211,6 +244,9 @@ case "$CMD" in
             shift
         fi
         run_restore "$BEFORE"
+        ;;
+    cleanup)
+        run_cleanup "$@"
         ;;
     help|--help|-h)
         show_help
