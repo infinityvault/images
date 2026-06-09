@@ -1,9 +1,10 @@
 FROM alpine:3.22
 
-# Install deps: restic, postgresql client tools, jq, bash, ca-certs
+# Install deps: restic, PostgreSQL/MySQL client tools, jq, bash, ca-certs
 RUN apk add --no-cache \
       restic \
       postgresql16-client \
+      mariadb-client \
       jq \
       bash \
       ca-certificates \

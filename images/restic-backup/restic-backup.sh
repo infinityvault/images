@@ -10,6 +10,11 @@ POSTGRES_DB="${POSTGRES_DB}"
 POSTGRES_USER="${POSTGRES_USER}"
 POSTGRES_PASSWORD="${POSTGRES_PASSWORD}"
 POSTGRES_DUMP_FILE="${POSTGRES_DUMP_FILE:-db_dump.sql}"
+MYSQL_HOST="${MYSQL_HOST}"
+MYSQL_DB="${MYSQL_DB:-${MYSQL_DATABASE:-}}"
+MYSQL_USER="${MYSQL_USER}"
+MYSQL_PASSWORD="${MYSQL_PASSWORD}"
+MYSQL_DUMP_FILE="${MYSQL_DUMP_FILE:-mysql_dump.sql}"
 TELEGRAM_BOT_TOKEN="${TELEGRAM_BOT_TOKEN}"
 TELEGRAM_GROUP_ID="${TELEGRAM_GROUP_ID}"
 TELEGRAM_NOTIFY_ALWAYS="${TELEGRAM_NOTIFY_ALWAYS:-false}"
@@ -49,6 +54,25 @@ dump_postgres() {
     fi
 }
 
+# --- Helper: MySQL dump ---
+dump_mysql() {
+    if [[ -n "$MYSQL_HOST" && -n "$MYSQL_DB" && -n "$MYSQL_USER" && -n "$MYSQL_PASSWORD" ]]; then
+        echo "Dumping MySQL database..."
+        MYSQL_PWD="$MYSQL_PASSWORD" mysqldump -h "$MYSQL_HOST" -u "$MYSQL_USER" --single-transaction --routines --events --triggers "$MYSQL_DB" > "$DATA_DIR/$MYSQL_DUMP_FILE" || {
+            notify_telegram "MySQL dump failed"; exit 1;
+        }
+    fi
+}
+
+# --- Helper: Detect configured databases ---
+postgres_configured() {
+    [[ -n "$POSTGRES_HOST" && -n "$POSTGRES_DB" && -n "$POSTGRES_USER" && -n "$POSTGRES_PASSWORD" ]]
+}
+
+mysql_configured() {
+    [[ -n "$MYSQL_HOST" && -n "$MYSQL_DB" && -n "$MYSQL_USER" && -n "$MYSQL_PASSWORD" ]]
+}
+
 # --- Helper: Check if directory is empty ---
 data_dir_is_empty() {
     if [[ ! -d "$DATA_DIR" ]]; then
@@ -62,15 +86,37 @@ data_dir_is_empty() {
     return 1
 }
 
-# --- Helper: Check if database is empty ---
-db_is_empty() {
-    if [[ -z "$POSTGRES_HOST" || -z "$POSTGRES_DB" || -z "$POSTGRES_USER" || -z "$POSTGRES_PASSWORD" ]]; then
+# --- Helper: Check if Postgres database is empty ---
+postgres_db_is_empty() {
+    if postgres_configured; then
+        local q="SELECT COUNT(*) FROM information_schema.tables WHERE table_schema='public';"
+        local count
+        set +e
+        count="$(PGPASSWORD="$POSTGRES_PASSWORD" psql -h "$POSTGRES_HOST" -U "$POSTGRES_USER" -d "$POSTGRES_DB" -tA -c "$q" 2>/dev/null)"
+        local rc=$?
+        set -e
+        if [[ $rc -ne 0 ]]; then
+            return 0
+        fi
+        if [[ "${count:-0}" =~ ^[0-9]+$ ]] && [[ "$count" -eq 0 ]]; then
+            return 0
+        fi
+        return 1
+    fi
+
+    return 0
+}
+
+# --- Helper: Check if MySQL database is empty ---
+mysql_db_is_empty() {
+    if ! mysql_configured; then
         return 0
     fi
-    local q="SELECT COUNT(*) FROM information_schema.tables WHERE table_schema='public';"
+
+    local q="SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = DATABASE();"
     local count
     set +e
-    count="$(PGPASSWORD="$POSTGRES_PASSWORD" psql -h "$POSTGRES_HOST" -U "$POSTGRES_USER" -d "$POSTGRES_DB" -tA -c "$q" 2>/dev/null)"
+    count="$(MYSQL_PWD="$MYSQL_PASSWORD" mysql -h "$MYSQL_HOST" -u "$MYSQL_USER" -N -B -e "$q" "$MYSQL_DB" 2>/dev/null)"
     local rc=$?
     set -e
     if [[ $rc -ne 0 ]]; then
@@ -104,6 +150,7 @@ select_snapshot() {
 run_backup() {
     check_or_init_repo
     dump_postgres
+    dump_mysql
     echo "Running restic backup..."
     if ! restic backup "$DATA_DIR"; then
         notify_telegram "Restic backup failed"
@@ -136,8 +183,8 @@ run_restore() {
     else
         echo "DATA_DIR is not empty, skipping filesystem restore."
     fi
-    if db_is_empty; then
-        if [[ -n "$POSTGRES_HOST" && -n "$POSTGRES_DB" && -n "$POSTGRES_USER" && -n "$POSTGRES_PASSWORD" ]]; then
+    if postgres_configured; then
+        if postgres_db_is_empty; then
             local dump_file="$DATA_DIR/$POSTGRES_DUMP_FILE"
             if [[ -f "$dump_file" ]]; then
                 echo "Restoring Postgres DB from $dump_file..."
@@ -150,9 +197,28 @@ run_restore() {
             else
                 echo "No Postgres dump file found at $dump_file, skipping DB restore."
             fi
+        else
+            echo "Postgres database is not empty, skipping DB restore."
         fi
-    else
-        echo "Database is not empty, skipping DB restore."
+    fi
+
+    if mysql_configured; then
+        if mysql_db_is_empty; then
+            local dump_file="$DATA_DIR/$MYSQL_DUMP_FILE"
+            if [[ -f "$dump_file" ]]; then
+                echo "Restoring MySQL DB from $dump_file..."
+                if MYSQL_PWD="$MYSQL_PASSWORD" mysql -h "$MYSQL_HOST" -u "$MYSQL_USER" "$MYSQL_DB" < "$dump_file"; then
+                    restored=true
+                else
+                    notify_telegram "Restic restore (MySQL database) failed"
+                    exit 1
+                fi
+            else
+                echo "No MySQL dump file found at $dump_file, skipping DB restore."
+            fi
+        else
+            echo "MySQL database is not empty, skipping DB restore."
+        fi
     fi
     if [[ "$TELEGRAM_NOTIFY_ALWAYS" == "true" && "$restored" == true ]]; then
         notify_telegram "Restic restore completed successfully"
@@ -209,6 +275,11 @@ Configuration (via environment variables):
   POSTGRES_USER           Postgres user
   POSTGRES_PASSWORD       Postgres password
   POSTGRES_DUMP_FILE      Filename for DB dump in DATA_DIR (default: db_dump.sql)
+  MYSQL_HOST              MySQL host (optional, for DB backup/restore)
+  MYSQL_DB                MySQL database name (MYSQL_DATABASE is also accepted)
+  MYSQL_USER              MySQL user
+  MYSQL_PASSWORD          MySQL password
+  MYSQL_DUMP_FILE         Filename for MySQL dump in DATA_DIR (default: mysql_dump.sql)
   TELEGRAM_BOT_TOKEN      Telegram bot token (optional, for notifications)
   TELEGRAM_GROUP_ID       Telegram group/chat ID (optional)
   TELEGRAM_NOTIFY_ALWAYS  Send Telegram notification always (true/false, default: false)
