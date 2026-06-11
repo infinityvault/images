@@ -1,10 +1,15 @@
-FROM alpine:3.22
+ARG ALPINE_VERSION=3.22
+FROM alpine:${ALPINE_VERSION}
+
+# Build-time selection of DB client packages.
+ARG POSTGRES_CLIENT_PKG=postgresql16-client
+ARG MYSQL_CLIENT_PKG=mariadb-client
 
 # Install deps: restic, PostgreSQL/MySQL client tools, jq, bash, ca-certs
 RUN apk add --no-cache \
       restic \
-      postgresql16-client \
-      mariadb-client \
+      ${POSTGRES_CLIENT_PKG} \
+      ${MYSQL_CLIENT_PKG} \
       jq \
       bash \
       ca-certificates \

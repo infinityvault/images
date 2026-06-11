@@ -1,0 +1,41 @@
+{
+  "variants": [
+    {
+      "tagSuffix": "pg15",
+      "buildArgs": {
+        "POSTGRES_CLIENT_PKG": "postgresql15-client"
+      }
+    },
+    {
+      "tagSuffix": "pg16",
+      "buildArgs": {
+        "POSTGRES_CLIENT_PKG": "postgresql16-client"
+      }
+    },
+    {
+      "tagSuffix": "pg17",
+      "buildArgs": {
+        "POSTGRES_CLIENT_PKG": "postgresql17-client"
+      }
+    },
+    {
+      "tagSuffix": "pg18",
+      "buildArgs": {
+        "POSTGRES_CLIENT_PKG": "postgresql18-client",
+        "ALPINE_VERSION": "3.24"
+      }
+    },
+    {
+      "tagSuffix": "mariadb",
+      "buildArgs": {
+        "MYSQL_CLIENT_PKG": "mariadb-client"
+      }
+    },
+    {
+      "tagSuffix": "mysql",
+      "buildArgs": {
+        "MYSQL_CLIENT_PKG": "mysql-client"
+      }
+    }
+  ]
+}

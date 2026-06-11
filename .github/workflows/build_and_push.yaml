@@ -3,7 +3,7 @@ name: Build and Push Docker Image
 on:
   push:
     tags:
-      - '*_*'  # Matches tags like my-image_v0.0.1
+      - '*_*'  # Matches tags like my-image_0.0.1
 
 jobs:
   docker:
@@ -34,7 +34,8 @@ jobs:
         run: |
           TAG="${GITHUB_REF#refs/tags/}"
           IMAGE_NAME="${TAG%%_*}"
-          VERSION="${TAG#*_}"
+          RAW_VERSION="${TAG#*_}"
+          VERSION="${RAW_VERSION#v}"
           echo "image_name=${IMAGE_NAME}" >> $GITHUB_OUTPUT
           echo "version=${VERSION}" >> $GITHUB_OUTPUT
 
@@ -43,9 +44,50 @@ jobs:
           IMAGE_NAME=${{ steps.extract.outputs.image_name }}
           VERSION=${{ steps.extract.outputs.version }}
           IMAGE_PATH="images/${IMAGE_NAME}"
-          IMAGE_TAG="ghcr.io/${{ github.repository_owner }}/${IMAGE_NAME}:${VERSION}"
-          IMAGE_TAG_LATEST="ghcr.io/${{ github.repository_owner }}/${IMAGE_NAME}:latest"
+          IMAGE_REPO="ghcr.io/${{ github.repository_owner }}/${IMAGE_NAME}"
+          VARIANTS_FILE="${IMAGE_PATH}/build-variants.json"
 
-          docker build -t "$IMAGE_TAG" -t "$IMAGE_TAG_LATEST" "$IMAGE_PATH"
-          docker push "$IMAGE_TAG"
-          docker push "$IMAGE_TAG_LATEST"
+          if [ -f "$VARIANTS_FILE" ]; then
+            echo "Using build variants from ${VARIANTS_FILE}"
+            IMAGE_TAG="${IMAGE_REPO}:${VERSION}"
+            IMAGE_TAG_LATEST="${IMAGE_REPO}:latest"
+
+            echo "Building default image ${IMAGE_TAG}"
+            docker build -t "$IMAGE_TAG" -t "$IMAGE_TAG_LATEST" "$IMAGE_PATH"
+            docker push "$IMAGE_TAG"
+            docker push "$IMAGE_TAG_LATEST"
+
+            mapfile -t variants < <(jq -c '.variants[]' "$VARIANTS_FILE")
+
+            if [ "${#variants[@]}" -eq 0 ]; then
+              echo "ERROR: ${VARIANTS_FILE} exists but has no variants" >&2
+              exit 1
+            fi
+
+            for variant in "${variants[@]}"; do
+              tag_suffix="$(echo "$variant" | jq -r '.tagSuffix')"
+              if [ -z "$tag_suffix" ] || [ "$tag_suffix" = "null" ]; then
+                echo "ERROR: variant missing tagSuffix in ${VARIANTS_FILE}" >&2
+                exit 1
+              fi
+
+              IMAGE_TAG="${IMAGE_REPO}:${VERSION}-${tag_suffix}"
+              build_args=()
+              while IFS= read -r arg; do
+                if [ -n "$arg" ]; then
+                  build_args+=(--build-arg "$arg")
+                fi
+              done < <(echo "$variant" | jq -r '.buildArgs // {} | to_entries[] | "\(.key)=\(.value)"')
+
+              echo "Building ${IMAGE_TAG}"
+              docker build "${build_args[@]}" -t "${IMAGE_TAG}" "$IMAGE_PATH"
+              docker push "${IMAGE_TAG}"
+            done
+          else
+            IMAGE_TAG="${IMAGE_REPO}:${VERSION}"
+            IMAGE_TAG_LATEST="${IMAGE_REPO}:latest"
+
+            docker build -t "$IMAGE_TAG" -t "$IMAGE_TAG_LATEST" "$IMAGE_PATH"
+            docker push "$IMAGE_TAG"
+            docker push "$IMAGE_TAG_LATEST"
+          fi
